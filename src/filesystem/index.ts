@@ -27,9 +27,10 @@ import {
     headFile,
     setAllowedDirectories,
 } from './lib.js';
-import type {RawHashlineEdit} from "./hashline-edit/normalize-edits.js";
-import {HASHLINE_EDIT_DESCRIPTION} from "./hashline-edit/tool-description.js";
-import {executeHashlineEditTool} from "./hashline-edit/hashline-edit-executor.js";
+import {
+    HASHLINE_EDIT_DESCRIPTION,
+    executeHashlineEditTool
+} from './hashline-edit.js';
 
 // Command line argument parsing
 const args = process.argv.slice(2);
@@ -394,40 +395,46 @@ server.registerTool(
     }
 );
 
-interface HashlineEditArgs {
-    filePath: string
-    edits: RawHashlineEdit[]
-    delete?: boolean
-    rename?: string
-}
-
-server.registerTool({
-    description: HASHLINE_EDIT_DESCRIPTION,
-    args: {
-        filePath: tool.schema.string().describe("Absolute path to the file to edit"),
-        delete: tool.schema.boolean().optional().describe("Delete file instead of editing"),
-        rename: tool.schema.string().optional().describe("Rename output file path after edits"),
-        edits: tool.schema
-            .array(
-                tool.schema.object({
-                    op: tool.schema
-                        .union([
-                            tool.schema.literal("replace"),
-                            tool.schema.literal("append"),
-                            tool.schema.literal("prepend"),
-                        ])
-                        .describe("Hashline edit operation mode"),
-                    pos: tool.schema.string().optional().describe("Primary anchor in LINE#ID format"),
-                    end: tool.schema.string().optional().describe("Range end anchor in LINE#ID format"),
-                    lines: tool.schema
-                        .union([tool.schema.array(tool.schema.string()), tool.schema.string(), tool.schema.null()])
-                        .describe("Replacement or inserted lines as newline-delimited string. null deletes with replace"),
-                })
-            )
-            .describe("Array of edit operations to apply (empty when delete=true)"),
+server.registerTool(
+    "hashline_edit",
+    {
+        title: "Hashline Edit",
+        description: HASHLINE_EDIT_DESCRIPTION,
+        inputSchema: {
+            filePath: z.string().describe("Absolute path to the file to edit"),
+            delete: z.boolean().optional().describe("Delete file instead of editing"),
+            rename: z.string().optional().describe("Rename output file path after edits"),
+            edits: z.array(z.object({
+                op: z.enum(["replace", "append", "prepend"]).describe("Hashline edit operation mode"),
+                pos: z.string().optional().describe("Primary anchor in LINE#ID format"),
+                end: z.string().optional().describe("Range end anchor in LINE#ID format"),
+                lines: z.union([z.array(z.string()), z.string(), z.null()]).optional().describe("Replacement or inserted lines")
+            })).default([]).describe("Array of edit operations to apply")
+        },
+        outputSchema: {content: z.string()},
+        annotations: {readOnlyHint: false, idempotentHint: false, destructiveHint: true}
     },
-    execute: async (args: HashlineEditArgs, context: ToolContext) => executeHashlineEditTool(args, context, ctx),
-});
+    async (args: any) => {
+        // Validate Paths
+        const validPath = await validatePath(args.filePath);
+        let validRenamePath;
+        if (args.rename) {
+            validRenamePath = await validatePath(args.rename);
+        }
+
+        const result = await executeHashlineEditTool({
+            filePath: validPath,
+            edits: args.edits,
+            delete: args.delete,
+            rename: validRenamePath
+        });
+
+        return {
+            content: [{type: "text" as const, text: result}],
+            structuredContent: {content: result}
+        };
+    }
+);
 
 server.registerTool(
     "create_directory",
