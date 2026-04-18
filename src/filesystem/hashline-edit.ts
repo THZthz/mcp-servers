@@ -1,6 +1,8 @@
 import * as fs from 'fs/promises';
 import * as crypto from 'crypto';
 import {createTwoFilesPatch} from 'diff';
+import * as readline from 'readline';
+import { createReadStream } from 'node:fs';
 
 // ==========================================
 // Core Constants & Types
@@ -748,6 +750,66 @@ function normalizeHashlineEdits(rawEdits: RawHashlineEdit[]): HashlineEdit[] {
 function canCreateFromMissingFile(edits: HashlineEdit[]): boolean {
     if (edits.length === 0) return false;
     return edits.every((edit) => (edit.op === "append" || edit.op === "prepend") && !edit.pos);
+}
+
+function formatHashLine(lineNumber: number, content: string): string {
+    const hash = computeLineHash(lineNumber, content);
+    return `${lineNumber}#${hash}|${content}`;
+}
+
+// A Node.js stream transform that computes hashes and outputs chunks
+export async function* streamFormattedHashlines(filePath: string): AsyncGenerator<string> {
+    const fileStream = createReadStream(filePath, { encoding: 'utf8' });
+    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+    let lineNumber = 1;
+    let chunkLines: string[] = [];
+    const MAX_CHUNK_LINES = 200; // Baseline chunk size
+    for await (const line of rl) {
+        chunkLines.push(formatHashLine(lineNumber, line));
+        lineNumber++;
+        if (chunkLines.length >= MAX_CHUNK_LINES) {
+            yield chunkLines.join("\n");
+            chunkLines = []; // Reset chunk
+        }
+    }
+    if (chunkLines.length > 0) {
+        yield chunkLines.join("\n");
+    }
+}
+
+// --- Stream Reader with Head/Tail Support ---
+export async function streamAndFormatFile(filePath: string, head?: number, tail?: number): Promise<string> {
+    const fileStream = createReadStream(filePath, { encoding: 'utf8' });
+    const rl = readline.createInterface({
+        input: fileStream,
+        crlfDelay: Infinity // Recognizes all instances of CR LF ('\r\n') as a single line break
+    });
+    let lineNumber = 1;
+    const formattedLines: string[] = [];
+
+    // For tail, use a sliding window to capture the last N lines while preserving original line numbers
+    const tailBuffer: { lineNum: number; content: string }[] = [];
+    for await (const line of rl) {
+        if (tail !== undefined) {
+            tailBuffer.push({ lineNum: lineNumber, content: line });
+            if (tailBuffer.length > tail) {
+                tailBuffer.shift(); // Keep only the last 'tail' elements
+            }
+        } else {
+            formattedLines.push(formatHashLine(lineNumber, line));
+            if (head !== undefined && lineNumber >= head) {
+                rl.close();
+                break;
+            }
+        }
+        lineNumber++;
+    }
+    if (tail !== undefined) {
+        for (const item of tailBuffer) {
+            formattedLines.push(formatHashLine(item.lineNum, item.content));
+        }
+    }
+    return formattedLines.join("\n");
 }
 
 export const HASHLINE_EDIT_DESCRIPTION = `Edit files using LINE#ID format for precise, safe modifications.

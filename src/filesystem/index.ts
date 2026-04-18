@@ -29,7 +29,8 @@ import {
 } from './lib.js';
 import {
     HASHLINE_EDIT_DESCRIPTION,
-    executeHashlineEditTool
+    executeHashlineEditTool,
+    streamAndFormatFile
 } from './hashline-edit.js';
 
 // Command line argument parsing
@@ -191,23 +192,15 @@ async function readFileAsBase64Stream(filePath: string): Promise<string> {
 
 // Tool registrations
 
-// read_file (deprecated) and read_text_file
+// read_text_file
 const readTextFileHandler = async (args: z.infer<typeof ReadTextFileArgsSchema>) => {
+    // Assuming validatePath is defined in your scope
     const validPath = await validatePath(args.path);
-
     if (args.head && args.tail) {
         throw new Error("Cannot specify both head and tail parameters simultaneously");
     }
-
-    let content: string;
-    if (args.tail) {
-        content = await tailFile(validPath, args.tail);
-    } else if (args.head) {
-        content = await headFile(validPath, args.head);
-    } else {
-        content = await readFileContent(validPath);
-    }
-
+    // Process file line-by-line to generate exact LINE#ID references
+    const content = await streamAndFormatFile(validPath, args.head, args.tail);
     return {
         content: [{type: "text" as const, text: content}],
         structuredContent: {content}
@@ -215,29 +208,14 @@ const readTextFileHandler = async (args: z.infer<typeof ReadTextFileArgsSchema>)
 };
 
 server.registerTool(
-    "read_file",
-    {
-        title: "Read File (Deprecated)",
-        description: "Read the complete contents of a file as text. DEPRECATED: Use read_text_file instead.",
-        inputSchema: ReadTextFileArgsSchema.shape,
-        outputSchema: {content: z.string()},
-        annotations: {readOnlyHint: true}
-    },
-    readTextFileHandler
-);
-
-server.registerTool(
     "read_text_file",
     {
         title: "Read Text File",
-        description:
-            "Read the complete contents of a file from the file system as text. " +
-            "Handles various text encodings and provides detailed error messages " +
-            "if the file cannot be read. Use this tool when you need to examine " +
-            "the contents of a single file. Use the 'head' parameter to read only " +
-            "the first N lines of a file, or the 'tail' parameter to read only " +
-            "the last N lines of a file. Operates on the file as text regardless of extension. " +
-            "Only works within allowed directories.",
+        description: `Read the complete contents of a file from the file system as text.
+Outputs text in LINE#ID|CONTENT format required by the hashline edit tool.
+Use this tool when you need to examine the contents of a single file.
+Use the 'head' parameter to read only the first N lines, or the 'tail' parameter to read only the last N lines.
+Operates on the file as text.`,
         inputSchema: {
             path: z.string(),
             tail: z.number().optional().describe("If provided, returns only the last N lines of the file"),
