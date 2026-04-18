@@ -20,8 +20,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server-everything": "*",
-    "@modelcontextprotocol/server-memory": "*",
     "@modelcontextprotocol/server-filesystem": "*",
+    "@modelcontextprotocol/server-memory": "*",
     "@modelcontextprotocol/server-sequential-thinking": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
   }
 }
